@@ -1,0 +1,336 @@
+# two_snake_battle.py
+# Snake vs AI Bot — boxed arena, fruit spawns, grow on eat
+# Rules:
+# - Snakes CAN go over their own bodies (no self-collision).
+# - Snakes CANNOT hit the opponent's body (loss).
+# - Hitting a wall = loss.
+# - Head-to-head = draw (auto-restart).
+
+import sys
+import random
+import pygame
+from collections import deque
+
+# Basic config
+CELL = 20
+COLS, ROWS = 30, 24             # 600x480 window
+WIDTH, HEIGHT = COLS*CELL, ROWS*CELL
+FPS = 10                         # game speed (increase as you like)
+
+# Colors
+BLACK = (0, 0, 0)
+GRID  = (30, 30, 30)
+WHITE = (240, 240, 240)
+GREEN = (0, 200, 0)
+LIME  = (100, 255, 100)
+RED   = (220, 30, 30)
+ORANGE= (255, 140, 0)
+CYAN  = (0, 200, 200)
+WALLC = (80, 80, 80)
+
+# Directions (dx, dy) in grid cells
+UP, DOWN, LEFT, RIGHT = (0, -1), (0, 1), (-1, 0), (1, 0)
+DIRS = [UP, DOWN, LEFT, RIGHT]
+
+pygame.init()
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Snake vs AI Bot")
+clock = pygame.time.Clock()
+font = pygame.font.SysFont("consolas", 18, bold=True)
+bigfont = pygame.font.SysFont("consolas", 36, bold=True)
+
+# Helpers
+def in_bounds(pos):
+    x, y = pos
+    return 0 <= x < COLS and 0 <= y < ROWS
+
+def rand_empty_cell(blocked):
+    """Return a random cell not in blocked set."""
+    while True:
+        p = (random.randrange(COLS), random.randrange(ROWS))
+        if p not in blocked:
+            return p
+
+def draw_cell(p, color):
+    x, y = p
+    pygame.draw.rect(screen, color, (x*CELL, y*CELL, CELL, CELL))
+
+def draw_grid():
+    for x in range(COLS):
+        pygame.draw.line(screen, GRID, (x*CELL, 0), (x*CELL, HEIGHT))
+    for y in range(ROWS):
+        pygame.draw.line(screen, GRID, (0, y*CELL), (WIDTH, y*CELL))
+
+def draw_walls():
+    # Border box
+    pygame.draw.rect(screen, WALLC, (0, 0, WIDTH, CELL))                 # top
+    pygame.draw.rect(screen, WALLC, (0, HEIGHT-CELL, WIDTH, CELL))       # bottom
+    pygame.draw.rect(screen, WALLC, (0, 0, CELL, HEIGHT))                # left
+    pygame.draw.rect(screen, WALLC, (WIDTH-CELL, 0, CELL, HEIGHT))       # right
+
+def head_to(p, d):
+    return (p[0] + d[0], p[1] + d[1])
+
+# Snake
+class Snake:
+    def __init__(self, start, direction, color_head, color_body, is_bot=False, name=""):
+        self.body = deque([start, (start[0]-direction[0], start[1]-direction[1]),
+                           (start[0]-2*direction[0], start[1]-2*direction[1])])
+        self.dir = direction
+        self.grow_pending = 0
+        self.color_head = color_head
+        self.color_body = color_body
+        self.is_bot = is_bot
+        self.name = name
+        self.score = 0
+
+    @property
+    def head(self):
+        return self.body[0]
+
+    def set_dir(self, d):
+        # Unlike classic snake, reversing is allowed (no self-collision rule),
+        # so we do not block opposite direction.
+        self.dir = d
+
+    def step(self):
+        new_head = head_to(self.head, self.dir)
+        self.body.appendleft(new_head)
+        if self.grow_pending > 0:
+            self.grow_pending -= 1
+        else:
+            self.body.pop()
+
+    def grow(self, n=1):
+        self.grow_pending += n
+        self.score += 1
+
+    def draw(self):
+        # draw head brighter
+        draw_cell(self.head, self.color_head)
+        for p in list(self.body)[1:]:
+            draw_cell(p, self.color_body)
+
+    def cells_set(self):
+        return set(self.body)
+
+# ---------------------------
+# AI (BFS path to nearest fruit)
+# - Treat walls and OPPONENT body as obstacles.
+# - Own body is passable by rule.
+# ---------------------------
+def bfs_shortest_path(start, goals, blocked):
+    """Return first step toward nearest goal using BFS; None if no path.
+       blocked: set of cells not allowed to step on.
+    """
+    if start in goals:
+        return None
+    q = deque()
+    q.append(start)
+    visited = {start: None}
+    while q:
+        cur = q.popleft()
+        if cur in goals:
+            # reconstruct:
+            path = []
+            node = cur
+            while node is not None:
+                path.append(node)
+                node = visited[node]
+            path.reverse()
+            if len(path) >= 2:
+                return path[1]  # next step from start
+            return None
+        for d in DIRS:
+            nxt = head_to(cur, d)
+            if in_bounds(nxt) and nxt not in blocked and nxt not in visited:
+                visited[nxt] = cur
+                q.append(nxt)
+    return None
+
+def ai_choose_direction(bot: Snake, player: Snake, fruits):
+    # Goals are all fruit positions
+    goals = set(fruits)
+    if not goals:
+        return bot.dir
+
+    # Block walls (outer ring) + player's body.
+    blocked = set()
+    # walls
+    for x in range(COLS):
+        blocked.add((x, 0))
+        blocked.add((x, ROWS-1))
+    for y in range(ROWS):
+        blocked.add((0, y))
+        blocked.add((COLS-1, y))
+    # opponent body blocks
+    blocked |= player.cells_set()
+
+    nxt_cell = bfs_shortest_path(bot.head, goals, blocked)
+    if nxt_cell is None:
+        # Fallback: pick any safe direction that doesn't hit wall or player body
+        safe_dirs = []
+        for d in DIRS:
+            cand = head_to(bot.head, d)
+            if in_bounds(cand) and cand not in blocked:
+                safe_dirs.append(d)
+        if safe_dirs:
+            # heuristic: prefer keeping direction if it's safe
+            if bot.dir in safe_dirs:
+                return bot.dir
+            return random.choice(safe_dirs)
+        else:
+            # Nowhere to go — keep direction (likely dying)
+            return bot.dir
+    else:
+        dx = nxt_cell[0] - bot.head[0]
+        dy = nxt_cell[1] - bot.head[1]
+        return (dx, dy)
+
+# Game
+class Game:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        # Player on left moving right; Bot on right moving left
+        self.player = Snake(start=(3, ROWS//2), direction=RIGHT,
+                            color_head=GREEN, color_body=LIME, is_bot=False, name="PLAYER")
+        self.bot = Snake(start=(COLS-4, ROWS//2), direction=LEFT,
+                         color_head=ORANGE, color_body=RED, is_bot=True, name="BOT")
+
+        # fruits
+        self.fruits = []
+        self.spawn_initial_fruits()
+
+        self.state = "PLAY"
+        self.message = ""
+
+    def spawn_initial_fruits(self, n=3):
+        blocked = self.player.cells_set() | self.bot.cells_set() | self.border_cells()
+        for _ in range(n):
+            self.fruits.append(rand_empty_cell(blocked))
+            blocked.add(self.fruits[-1])
+
+    def border_cells(self):
+        b = set()
+        for x in range(COLS):
+            b.add((x, 0))
+            b.add((x, ROWS-1))
+        for y in range(ROWS):
+            b.add((0, y))
+            b.add((COLS-1, y))
+        return b
+
+    def spawn_fruit(self):
+        blocked = self.player.cells_set() | self.bot.cells_set() | set(self.fruits) | self.border_cells()
+        self.fruits.append(rand_empty_cell(blocked))
+
+    def handle_input(self):
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            elif e.type == pygame.KEYDOWN:
+                if self.state != "PLAY":
+                    if e.key in (pygame.K_SPACE, pygame.K_RETURN):
+                        self.reset()
+                else:
+                    if e.key == pygame.K_UP:    self.player.set_dir(UP)
+                    if e.key == pygame.K_DOWN:  self.player.set_dir(DOWN)
+                    if e.key == pygame.K_LEFT:  self.player.set_dir(LEFT)
+                    if e.key == pygame.K_RIGHT: self.player.set_dir(RIGHT)
+
+    def update(self):
+        if self.state != "PLAY":
+            return
+
+        # BOT picks direction
+        bot_dir = ai_choose_direction(self.bot, self.player, self.fruits)
+        self.bot.set_dir(bot_dir)
+
+        # Advance both snakes (simultaneous)
+        self.player.step()
+        self.bot.step()
+
+        # Check fruit eats
+        self.check_eats(self.player)
+        self.check_eats(self.bot)
+
+        # Check collisions (order: walls, opponent body, head-to-head)
+        state, msg = self.check_outcomes()
+        if state:
+            self.state, self.message = state, msg
+
+        # Keep at least one fruit on board
+        if len(self.fruits) < 3:
+            self.spawn_fruit()
+
+    def check_eats(self, snake: Snake):
+        if snake.head in self.fruits:
+            self.fruits.remove(snake.head)
+            snake.grow(1)
+
+    def check_outcomes(self):
+        # Walls
+        borders = self.border_cells()
+        if self.player.head in borders and self.bot.head in borders:
+            return "DRAW", "Both hit the wall. Draw! (Press SPACE)"
+        if self.player.head in borders:
+            return "LOSE", "Hit the wall! Bot wins. (Press SPACE)"
+        if self.bot.head in borders:
+            return "WIN", "Bot hit the wall! You win. (Press SPACE)"
+
+        # Opponent body (NOT including head)
+        player_body_no_head = set(list(self.player.body)[1:])
+        bot_body_no_head = set(list(self.bot.body)[1:])
+
+        if self.player.head in bot_body_no_head and self.bot.head in player_body_no_head:
+            return "DRAW", "Head-to-body both sides. Draw! (Press SPACE)"
+        if self.player.head in bot_body_no_head:
+            return "LOSE", "Head hit the bot's body. Bot wins! (Press SPACE)"
+        if self.bot.head in player_body_no_head:
+            return "WIN", "Bot hit YOUR body. You win! (Press SPACE)"
+
+        # Head-to-head
+        if self.player.head == self.bot.head:
+            return "DRAW", "Head-to-head collision. Draw! (Press SPACE)"
+
+        # Self-collision is allowed (do nothing)
+        return None, ""
+
+    def draw(self):
+        screen.fill(BLACK)
+        draw_grid()
+        draw_walls()
+
+        # Fruits
+        for f in self.fruits:
+            pygame.draw.circle(screen, CYAN,
+                               (f[0]*CELL + CELL//2, f[1]*CELL + CELL//2), CELL//3)
+
+        # Snakes
+        self.player.draw()
+        self.bot.draw()
+
+        # HUD
+        hud = f"YOU: {self.player.score}    BOT: {self.bot.score}"
+        txt = font.render(hud, True, WHITE)
+        screen.blit(txt, (8, 4))
+
+        if self.state != "PLAY":
+            banner = bigfont.render(self.message, True, WHITE)
+            rect = banner.get_rect(center=(WIDTH//2, HEIGHT//2))
+            screen.blit(banner, rect)
+
+# Main loop
+def main():
+    game = Game()
+    while True:
+        game.handle_input()
+        game.update()
+        game.draw()
+        pygame.display.flip()
+        clock.tick(FPS)
+
+if __name__ == "__main__":
+    main()
