@@ -1,0 +1,196 @@
+Personal Expense Tracker (SQL + Python + Streamlit)
+
+1. Introduction
+
+Managing personal finances is a daily challenge for many individuals. People often lose track of where their money goes and fail to maintain a budget.
+To address this, we built a Personal Expense Tracker using Python, SQL (SQLite), Pandas, Plotly, and Streamlit. The tracker allows users to log daily expenses, categorize them, visualize spending trends, and export data for review. Finally, the app was deployed on Streamlit Cloud, making it accessible from anywhere in the world.
+
+⸻
+
+2. Objectives
+	•	Provide an easy-to-use web app for tracking expenses.
+	•	Use an SQL database (SQLite) for structured storage and querying.
+	•	Enable data visualization (spending per category, monthly trends).
+	•	Provide import/export functionality for expense records.
+	•	Deploy the app online so it’s accessible via a shareable link.
+
+⸻
+
+3. Technologies & Tools Used
+
+Programming Language
+	•	Python 3 → Core development language.
+
+Libraries
+	1.	Streamlit → Web framework for interactive dashboards.
+	2.	Pandas → For data manipulation and analysis.
+	3.	SQLAlchemy → For database interaction (with SQLite).
+	4.	Plotly Express → For interactive charts (bar, line).
+	5.	Dateutil → To handle date parsing.
+
+Database
+	•	SQLite (via SQLAlchemy engine)
+	•	Chosen because it’s lightweight, file-based, and easy to deploy with Streamlit.
+
+Deployment
+	•	GitHub → Version control & repository hosting.
+	•	Streamlit Cloud → Hosting platform to deploy Python apps.
+
+⸻
+
+4. Application Features
+	1.	Add Expense
+	  •	User can input date, category, description, and amount.
+	  •	Data is stored in the SQLite database.
+	2.	View Expenses
+	  •	Displays all expenses in a table with delete row option.
+	  •	A “Clear All Data” button resets the database.
+	3.	Import CSV
+	  •	Users can upload a .csv file of expenses (with date, category, description, amount).
+	  •	Data is bulk-inserted into the database.
+	4.	Export Data
+	  •	Users can download all expense records as a .csv file.
+	5.	Analytics
+	  •	Spend by Category: Bar chart of category-wise spending.
+	  •	Monthly Trend: Line chart of monthly expenses.
+	  •	Metrics: Total Spend, Monthly Spend, Budget Left.
+	6.	Budget Setting
+	  •	Users can set a monthly budget and compare actual spending against it.
+	7.	Row-Level Delete
+	  •	Added trash bin 🗑️ button for deleting individual rows (fixed from earlier bug that cleared all rows).
+
+⸻
+
+5. Code Explanation
+
+Database Setup
+
+DB_URL = "sqlite:///expenses.db"
+engine = create_engine(DB_URL, future=True)
+
+def init_db():
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT,
+                amount REAL NOT NULL
+            )
+        """))
+
+	•	We used SQLite with SQLAlchemy ORM.
+	•	Table expenses stores all records.
+
+⸻
+
+Insert Expense
+
+def insert_expense(exp_date, category, description, amount):
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO expenses (date, category, description, amount) VALUES (:d, :c, :desc, :a)"),
+            {"d": exp_date, "c": category, "desc": description, "a": amount}
+        )
+
+	•	Inserts new records from the UI into the database.
+
+⸻
+
+Fetch Data
+
+def fetch_df():
+    df = pd.read_sql("SELECT * FROM expenses ORDER BY date DESC, id DESC", engine)
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+    return df
+
+	•	Retrieves all records and converts them into a Pandas DataFrame for analysis and display.
+
+⸻
+
+Delete / Clear Data
+
+def delete_expense(exp_id):
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM expenses WHERE id=:id"), {"id": exp_id})
+
+def clear_all_expenses():
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM expenses"))
+
+	•	delete_expense removes a single row.
+	•	clear_all_expenses removes all entries.
+
+⸻
+
+Streamlit UI
+	•	Sidebar contains input forms:
+	•	Add Expense
+	•	Import CSV
+	•	Monthly Budget
+	•	Tabs for:
+	1.	📋 Table → View + Delete expenses.
+	2.	📊 Category Summary → Spend by category (bar chart).
+	3.	📈 Trends → Monthly spend trend (line chart).
+	4.	📦 Export → Download all data.
+
+⸻
+
+Visualization with Plotly
+
+fig = px.bar(by_cat, x="category", y="amount", title="Total Spend by Category")
+st.plotly_chart(fig)
+
+	•	Provides interactive, dynamic plots instead of static matplotlib.
+
+⸻
+
+6. Deployment Process
+	1.	Created GitHub repo → expense-tracker.
+	2.	Added files → app.py and requirements.txt.
+	3.	Pushed code from Codespaces to GitHub.
+	4.	Deployed on Streamlit Cloud:
+	  •	Repo: AnshSankrityayan/expense-tracker
+	  •	Branch: main
+	  •	File path: app.py
+	5.	Streamlit automatically installed dependencies from requirements.txt.
+	6.	Got live link:
+👉 https://expense-tracker-l5mdeahv8eogy7hvdrsh9c.streamlit.app
+
+⸻
+
+7. Challenges Faced
+	•	Zsh errors when setting up local venv. Fixed by switching to python3.
+	•	Datetime error (naive vs aware) in earlier project. Learned to normalize timestamps.
+	•	Deleting expenses → Initially, the dustbin deleted all rows. Fixed by adding delete_expense(row["id"]).
+	•	Deployment error (ModuleNotFoundError: sqlalchemy) → Fixed by adding dependencies to requirements.txt.
+	•	GitHub remote issues → Resolved by re-initializing and correctly setting origin.
+
+⸻
+
+8. Real-World Impact
+	•	Helps users track and control spending.
+	•	Encourages financial discipline through visual feedback and budgeting.
+	•	Can be extended to multi-user cloud storage for household/enterprise use.
+
+⸻
+
+9. Future Improvements
+	•	Multi-user login with authentication.
+	•	Persistent storage using PostgreSQL (Heroku/Render).
+	•	Mobile-friendly UI.
+	•	AI-based spending recommendations.
+	•	Integration with Google Sheets or bank APIs for auto-import of expenses.
+
+⸻
+
+10. Conclusion
+
+We successfully built and deployed a Personal Expense Tracker using Python, SQLAlchemy, Pandas, Plotly, and Streamlit. The app allows expense tracking, visualization, CSV import/export, and budget monitoring.
+With deployment on Streamlit Cloud, the project is accessible to anyone, anywhere, via a shareable link.
+
+This project demonstrates the practical integration of Python + SQL + Web Apps in solving a real-world problem, highlighting the power of data engineering and visualization in personal finance.
+
+⸻
